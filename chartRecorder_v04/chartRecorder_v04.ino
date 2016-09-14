@@ -84,8 +84,8 @@ void setup() {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
 
-  startRTC();
-  //startSD();
+  //startRTC();
+  startSD();
   //startTFT();
 
   // Open up the file we're going to log to!
@@ -109,26 +109,7 @@ void setup() {
 }
 
 void loop(){
-    DateTime now = RTC.now();
-    
-    Serial.print(now.year(), DEC);
-    Serial.print('/');
-    Serial.print(now.month(), DEC);
-    Serial.print('/');
-    Serial.print(now.day(), DEC);
 
-    Serial.print(now.hour(), DEC);
-    Serial.print(':');
-    Serial.print(now.minute(), DEC);
-    Serial.print(':');
-    Serial.print(now.second(), DEC);
-    Serial.println();
-    
-    Serial.print(" since midnight 1/1/1970 = ");
-    Serial.print(now.unixtime());
-    Serial.print("s = ");
-    Serial.print(now.unixtime() / 86400L);
-    Serial.println("d");
 }
 
 void startRTC() {
@@ -140,4 +121,19 @@ void startRTC() {
     // following line sets the RTC to the date & time this sketch was compiled
     RTC.adjust(DateTime(__DATE__, __TIME__));
   }
+}
+
+void startSD() {
+  Serial.print("Initializing SD card...");
+  // make sure that the default chip select pin is set to
+  // output, even if you don't use it:
+  pinMode(SS, OUTPUT);
+  
+  // see if the card is present and can be initialized:
+  if (!SD.begin(10,11,12,13)) { // formerly 10,11,12,13 (malformed call?). Value of 4 from datalogger docs
+    Serial.println("Card failed, or not present");
+    // don't do anything more:
+    while (1) ;
+  }
+  Serial.println("card initialized.");
 }
