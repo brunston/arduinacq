@@ -84,9 +84,9 @@ void setup() {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
 
-  //startRTC();
+  startRTC();
   startSD();
-  //startTFT();
+  startTFT();
 
   // Open up the file we're going to log to!
   dataFile = SD.open("datalog.txt", FILE_WRITE);
@@ -136,4 +136,47 @@ void startSD() {
     while (1) ;
   }
   Serial.println("card initialized.");
+}
+
+void startTFT() {
+  Serial.println("Trying to initialize RA8875 though SPI");
+  if (!tft.begin(RA8875_800x480)) {
+    Serial.println("RA8875 Not Found!");
+    while (1);
+  }
+  Serial.println("Found RA8875");
+
+  tft.displayOn(true);
+  tft.GPIOX(true);                              // Enable TFT - display enable tied to GPIOX
+  tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
+  tft.PWM1out(255);
+  //tft.writeReg(0x22, 0x10); // set text to portrait mode (rotate 90 degrees)
+  //tft.writeReg(0x20, 0x04); //reverse scan direction for Y (largest to smallest :))  
+    
+  Serial.print("Test the TFT display ... ");
+  // Something to let us know it is working...
+  tft.fillScreen(RA8875_BLACK);
+  tft.fillScreen(RA8875_RED);
+  tft.fillScreen(RA8875_GREEN);
+  tft.fillScreen(RA8875_BLUE);
+  tft.fillScreen(RA8875_BLACK);
+
+//  plotArea();
+  tft.textMode();
+  tft.textTransparent(RA8875_WHITE);
+  tft.textEnlarge(0);
+  tft.textSetCursor(20, 10);
+  tft.textWrite("Chart Recorder v04");
+
+  tft.textSetCursor(300, 10);
+  tft.textWrite("Ch 0: ");
+  tft.textSetCursor(400, 10);
+  tft.textWrite("Ch 1: ");
+  tft.textSetCursor(500, 10);
+  tft.textWrite("Ch 2: ");
+  tft.textSetCursor(600, 10);
+  tft.textWrite("Ch 3: ");
+
+ Serial.println("Done!");
+
 }
