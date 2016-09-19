@@ -31,6 +31,7 @@
 #include "FT5x06.h"
 #include "RTClib.h"
 #include "Adafruit_MAX31855.h"
+#include "TouchScreen.h"
 
 // set up variables TFT utility library functions:
 #define RA8875_CS         7   // RA8875 chip select for ISP communication
@@ -38,6 +39,8 @@
 #define RA8875_RESET      9    // Adafruit library puts a short low reset pulse at startup on this pin. 
                                // Not relevant for TFTM070 according to doc.
  
+#define SERIAL_DEBUG_ENABLED false  // set to true if you want debug info to serial port #ADDEDFROMLCMEG#
+
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 FT5x06 cmt = FT5x06(CTP_INT);
 
@@ -77,6 +80,36 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 #define LOG_INTERVAL 500
 File dataFile;
 
+// #ADDEDFROMLCMEG#
+
+void serialDebugOutput(int nr_of_touches, word *coordinates) {
+  for (byte i = 0; i < nr_of_touches; i++){
+
+    word x = coordinates[i * 2];
+    word y= coordinates[i * 2 + 1];
+    
+    Serial.print("x");
+    Serial.print(i);
+    Serial.print("=");
+    Serial.print(x);
+    Serial.print(",");
+    Serial.print("y");
+    Serial.print(i);
+    Serial.print("=");
+    Serial.print(y);
+    Serial.print("  ");
+  }
+}
+
+void printRawRegisterValuesToSerial(byte *registers) {
+    // print raw register values
+    for (int i = 0;i < FT5206_NUMBER_OF_REGISTERS ; i++){
+      Serial.print(registers[i],HEX);
+      Serial.print(",");
+    }
+    Serial.println("");
+}
+
 void setup() {
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
@@ -86,8 +119,6 @@ void setup() {
 
   startRTC();
   startSD();
-  startTFT();
-
   // Open up the file we're going to log to!
   dataFile = SD.open("datalog.txt", FILE_WRITE);
   if (! dataFile) {
@@ -95,6 +126,18 @@ void setup() {
     // Wait forever since we cant write data
     //while (1) ;
   }
+  Serial.println("Trying to initialize RA8875 though SPI");
+  if (!tft.begin(RA8875_800x480)) {
+    Serial.println("RA8875 Not Found!");
+    while (1);
+  }
+  Serial.println("Found RA8875");
+  cmt.init(SERIAL_DEBUG_ENABLED);
+  tft.displayOn(true);
+  tft.GPIOX(true);                              // Enable TFT - display enable tied to GPIOX
+  tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
+  tft.PWM1out(255);  
+  tft.fillScreen(RA8875_BLACK);
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -108,8 +151,39 @@ void setup() {
 
 }
 
-void loop(){
+word prev_coordinates[10];
+byte nr_of_touches = 0;
 
+void loop(){
+  byte registers[FT5206_NUMBER_OF_REGISTERS];
+  word coordinates[10];
+  byte prev_nr_of_touches = 0;
+  
+  if (cmt.touched()){
+    cmt.getRegisterInfo(registers);
+    nr_of_touches = cmt.getTouchPositions(coordinates,registers);
+    prev_nr_of_touches = nr_of_touches;
+    
+    for (byte i = 0 ; i < prev_nr_of_touches; i++){
+      word x = prev_coordinates[i * 2];
+      word y = prev_coordinates[i * 2 + 1];
+      tft.fillCircle(x, y, 70, RA8875_BLACK);
+    }
+    
+    for (byte i = 0; i < nr_of_touches; i++){
+      word x = coordinates[i*2];
+      word y = coordinates[i * 2 + 1];
+    
+      tft.fillCircle(x,y,10,RA8875_WHITE);
+      tft.textMode();
+      tft.textSetCursor(10,10);
+      tft.textEnlarge(0);
+      tft.textWrite("WRITING");
+
+    }
+    delay(10);
+    memcpy(prev_coordinates, coordinates, 20);
+  }
 }
 
 void startRTC() {
@@ -138,45 +212,5 @@ void startSD() {
   Serial.println("card initialized.");
 }
 
-void startTFT() {
-  Serial.println("Trying to initialize RA8875 though SPI");
-  if (!tft.begin(RA8875_800x480)) {
-    Serial.println("RA8875 Not Found!");
-    while (1);
-  }
-  Serial.println("Found RA8875");
-
-  tft.displayOn(true);
-  tft.GPIOX(true);                              // Enable TFT - display enable tied to GPIOX
-  tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
-  tft.PWM1out(255);
-  //tft.writeReg(0x22, 0x10); // set text to portrait mode (rotate 90 degrees)
-  //tft.writeReg(0x20, 0x04); //reverse scan direction for Y (largest to smallest :))  
-    
-  Serial.print("Test the TFT display ... ");
-  // Something to let us know it is working...
-  tft.fillScreen(RA8875_BLACK);
-  tft.fillScreen(RA8875_RED);
-  tft.fillScreen(RA8875_GREEN);
-  tft.fillScreen(RA8875_BLUE);
-  tft.fillScreen(RA8875_BLACK);
-
-//  plotArea();
-  tft.textMode();
-  tft.textTransparent(RA8875_WHITE);
-  tft.textEnlarge(0);
-  tft.textSetCursor(20, 10);
-  tft.textWrite("Chart Recorder v04");
-
-  tft.textSetCursor(300, 10);
-  tft.textWrite("Ch 0: ");
-  tft.textSetCursor(400, 10);
-  tft.textWrite("Ch 1: ");
-  tft.textSetCursor(500, 10);
-  tft.textWrite("Ch 2: ");
-  tft.textSetCursor(600, 10);
-  tft.textWrite("Ch 3: ");
-
- Serial.println("Done!");
-
+void withinBounds() { // determines if a touch is within a "button"'s bounds.
 }
