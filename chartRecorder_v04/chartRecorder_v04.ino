@@ -3,25 +3,25 @@
   ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
   2 Thermocouples (Adafruit MAX31855)
   Adafruit Data Logger Shield
- 
- 
+
+
  RA8875 communication, connect:
- 
+
    TFTM070(40 pin)   Arduino UNO pin    Description
     1,2                                 GND
     3,4                                 VCC
     5                10                 SPI SELECT
     6                ICSP_MISO          SDO / SPI_MISO
     7                ICSP_MOSI          SDI / SPI_MOSI
-    8                ICSP_SCK           CLK                
-   33                2                  CTP_INT touch data ready be read 
+    8                ICSP_SCK           CLK
+   33                2                  CTP_INT touch data ready be read
                                         from FT5x06 touch controller
    34                A4                 I2C for FT5x06 (preconfigured)
    35                A5                 I2C for FT5x06 (preconfigured)
 
   Thermocouple 0
   Thermocouple 1
-  
+
 ****************************************************************************************/
 #include <SPI.h>
 #include <Wire.h>
@@ -31,15 +31,13 @@
 #include "FT5x06.h"
 #include "RTClib.h"
 #include "Adafruit_MAX31855.h"
-#include "TouchScreen.h"
+//#include "TouchScreen.h"
 
 // set up variables TFT utility library functions:
 #define RA8875_CS         7   // RA8875 chip select for ISP communication
 #define CTP_INT           2    // touch data ready for read from FT5x06 touch controller
-#define RA8875_RESET      9    // Adafruit library puts a short low reset pulse at startup on this pin. 
+#define RA8875_RESET      9    // Adafruit library puts a short low reset pulse at startup on this pin.
                                // Not relevant for TFTM070 according to doc.
- 
-#define SERIAL_DEBUG_ENABLED false  // set to true if you want debug info to serial port #ADDEDFROMLCMEG#
 
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 FT5x06 cmt = FT5x06(CTP_INT);
@@ -64,7 +62,7 @@ SdFile root;
 // Arduino Ethernet shield: pin 4
 // Adafruit SD shields and modules: pin 10
 // Sparkfun SD shield: pin 8
-const int chipSelect = 10;    
+const int chipSelect = 10;
 
 // Thermocouple1 digital IO pins.
 #define thermo0DO   14
@@ -79,36 +77,6 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 // Our logging interval in milliseconds
 #define LOG_INTERVAL 500
 File dataFile;
-
-// #ADDEDFROMLCMEG#
-
-void serialDebugOutput(int nr_of_touches, word *coordinates) {
-  for (byte i = 0; i < nr_of_touches; i++){
-
-    word x = coordinates[i * 2];
-    word y= coordinates[i * 2 + 1];
-    
-    Serial.print("x");
-    Serial.print(i);
-    Serial.print("=");
-    Serial.print(x);
-    Serial.print(",");
-    Serial.print("y");
-    Serial.print(i);
-    Serial.print("=");
-    Serial.print(y);
-    Serial.print("  ");
-  }
-}
-
-void printRawRegisterValuesToSerial(byte *registers) {
-    // print raw register values
-    for (int i = 0;i < FT5206_NUMBER_OF_REGISTERS ; i++){
-      Serial.print(registers[i],HEX);
-      Serial.print(",");
-    }
-    Serial.println("");
-}
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -131,12 +99,21 @@ void setup() {
     Serial.println("RA8875 Not Found!");
     while (1);
   }
+
+  //starting TFT
+
   Serial.println("Found RA8875");
-  cmt.init(SERIAL_DEBUG_ENABLED);
+  cmt.init(false);
   tft.displayOn(true);
   tft.GPIOX(true);                              // Enable TFT - display enable tied to GPIOX
   tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
-  tft.PWM1out(255);  
+  tft.PWM1out(255);
+
+  //visual cue to show that the screen works
+  tft.fillScreen(RA8875_BLACK);
+  tft.fillScreen(RA8875_RED);
+  tft.fillScreen(RA8875_GREEN);
+  tft.fillScreen(RA8875_BLUE);
   tft.fillScreen(RA8875_BLACK);
 
   // basic readout test, just print the current temp
@@ -145,45 +122,57 @@ void setup() {
   Serial.print("Internal Temp 1 = ");
   Serial.println(thermocouple1.readInternal());
 
- 
+
   Serial.println("Setup done.");
 
 
 }
 
 word prev_coordinates[10];
+word transfer_coords[10];
 byte nr_of_touches = 0;
 
 void loop(){
   byte registers[FT5206_NUMBER_OF_REGISTERS];
-  word coordinates[10];
   byte prev_nr_of_touches = 0;
-  
+  word coordinates[10];
+
+  // ESTABLISH BUTTON COORDINATES
+  word SIZE_OF_BUTTONS[2] = {100,50};
+  word test_button[4] = {300, 300 + SIZE_OF_BUTTONS[0], 300, 300 + SIZE_OF_BUTTONS[1]};
   if (cmt.touched()){
     cmt.getRegisterInfo(registers);
     nr_of_touches = cmt.getTouchPositions(coordinates,registers);
     prev_nr_of_touches = nr_of_touches;
-    
-    for (byte i = 0 ; i < prev_nr_of_touches; i++){
-      word x = prev_coordinates[i * 2];
-      word y = prev_coordinates[i * 2 + 1];
-      tft.fillCircle(x, y, 70, RA8875_BLACK);
-    }
-    
+
+    //for (byte i = 0 ; i < prev_nr_of_touches; i++){
+    //  word x = prev_coordinates[i * 2];
+    //  word y = prev_coordinates[i * 2 + 1];
+    //  tft.fillCircle(x, y, 70, RA8875_BLACK);
+    //}
+
     for (byte i = 0; i < nr_of_touches; i++){
       word x = coordinates[i*2];
       word y = coordinates[i * 2 + 1];
-    
-      tft.fillCircle(x,y,10,RA8875_WHITE);
-      tft.textMode();
-      tft.textSetCursor(10,10);
-      tft.textEnlarge(0);
-      tft.textWrite("WRITING");
 
+      Serial.println("coord x = ");
+      Serial.println(x);
+      Serial.println("coord y = ");
+      Serial.println(y);
+      //tft.fillCircle(x,y,10,RA8875_WHITE);
+
+      // CHECK FOR BUTTON PRESSES
+      withinBounds(x, y, test_button);
     }
     delay(10);
     memcpy(prev_coordinates, coordinates, 20);
+    memcpy(transfer_coords, coordinates, 20);
   }
+
+  // DRAW BUTTONS
+  tft.graphicsMode();
+  tft.fillRect(int(test_button[0]),int(test_button[2]), SIZE_OF_BUTTONS[0], SIZE_OF_BUTTONS[1], RA8875_WHITE);
+  tft.graphicsMode();
 }
 
 void startRTC() {
@@ -202,15 +191,21 @@ void startSD() {
   // make sure that the default chip select pin is set to
   // output, even if you don't use it:
   pinMode(SS, OUTPUT);
-  
+
   // see if the card is present and can be initialized:
-  if (!SD.begin(10,11,12,13)) { // formerly 10,11,12,13 (malformed call?). Value of 4 from datalogger docs
+  if (!SD.begin(10,11,12,13)) { // pins connected from SD to Arduino
     Serial.println("Card failed, or not present");
     // don't do anything more:
     while (1) ;
   }
   Serial.println("card initialized.");
 }
-
-void withinBounds() { // determines if a touch is within a "button"'s bounds.
+void withinBounds(word x, word y, word bounds[]) { // determines if a touch is within a "button"'s bounds 
+ 
+    if (x > bounds[0] && x < bounds[1] && y > bounds[2] && y < bounds[3]){
+      tft.textMode();
+      tft.textSetCursor(50,10);
+      tft.textEnlarge(0);
+      tft.textWrite("Button touched.");
+  }
 }
