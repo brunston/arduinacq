@@ -31,7 +31,7 @@
 #include "FT5x06.h"
 #include "RTClib.h"
 #include "Adafruit_MAX31855.h"
-#include "TFTButton.h"
+//#include "TFTButton.h"
 
 // set up variables TFT utility library functions:
 #define RA8875_CS         7   // RA8875 chip select for ISP communication
@@ -42,7 +42,7 @@
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 FT5x06 cmt = FT5x06(CTP_INT);
 
-TFTButton button = TFTButton(100,100,300,100,tft);
+//TFTButton button = TFTButton(100,100,300,100,tft);
 
 // For the screen position
 #define X_MAX 800
@@ -118,7 +118,8 @@ void setup() {
   tft.fillScreen(RA8875_BLUE);
   tft.fillScreen(RA8875_BLACK);
 
-  button.drawButton();
+//  button.drawButton();
+
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -174,7 +175,7 @@ void loop(){
   }
 
   // DRAW BUTTONS
-  button.drawButton();
+  //button.drawButton();
   tft.graphicsMode();
   tft.fillRect(int(test_button[0]),int(test_button[2]), SIZE_OF_BUTTONS[0], SIZE_OF_BUTTONS[1], RA8875_WHITE);
   tft.graphicsMode();
