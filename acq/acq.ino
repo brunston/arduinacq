@@ -1,6 +1,6 @@
 /***************************************************************************************
- Chart Recorder with
-  ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
+arduinacq data acquisition and chart recording system
+with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
   2 Thermocouples (Adafruit MAX31855)
   Adafruit Data Logger Shield
 
@@ -76,9 +76,16 @@ const int chipSelect = 10;
 Adafruit_MAX31855 thermocouple0(thermo0CLK, thermo0CS, thermo0DO);
 Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 
-// Our logging interval in milliseconds
+// Our logging interval in milliseconds, and timing/logging info
 #define LOG_INTERVAL 500
 File dataFile;
+unsigned long log_timer;
+
+// Button coordinates and sizing
+int BUTTONSIZE[2] = {100,50};
+// int button_name[4] = {leftx, rightx, topy, boty};
+int b_start_logging[4] = {20, 20 + BUTTONSIZE[0], 20, 20 + BUTTONSIZE[1]};
+int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2*BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -87,22 +94,12 @@ void setup() {
     ; // wait for serial port to connect. Needed for Leonardo only
   }
 
-  startRTC();
-  startSD();
-  // Open up the file we're going to log to!
-  dataFile = SD.open("datalog.txt", FILE_WRITE);
-  if (! dataFile) {
-    Serial.println("error opening datalog.txt");
-    // Wait forever since we cant write data
-    //while (1) ;
-  }
+  //starting TFT
   Serial.println("Trying to initialize RA8875 though SPI");
   if (!tft.begin(RA8875_800x480)) {
     Serial.println("RA8875 Not Found!");
     while (1);
   }
-
-  //starting TFT
 
   Serial.println("Found RA8875");
   cmt.init(false);
@@ -117,9 +114,23 @@ void setup() {
   tft.fillScreen(RA8875_GREEN);
   tft.fillScreen(RA8875_BLUE);
   tft.fillScreen(RA8875_BLACK);
+  
+  startRTC();
+  startSD();
 
-//  button.drawButton();
+  // Open up the file we're going to log to!
+  dataFile = SD.open("datalog.txt", FILE_WRITE);
 
+  if (! dataFile) {
+    Serial.println("error opening datalog.txt");
+    // Wait forever since we cant write data
+    //while (1) ;
+  }
+  dataFile.close();
+
+  // DRAW BUTTONS
+  drawButton(b_start_logging, "start log");
+  drawButton(b_stop_logging, "stop log");
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -127,24 +138,31 @@ void setup() {
   Serial.print("Internal Temp 1 = ");
   Serial.println(thermocouple1.readInternal());
 
-
+  // GET TIMER LOG
+  log_timer = millis();
   Serial.println("Setup done.");
-
-
+  
 }
 
 word prev_coordinates[10];
 word transfer_coords[10];
 byte nr_of_touches = 0;
 
+// used to update the status line in touch gui
+bool delt_status = false;
+char current_condition[ ] = "";
+
+// status of button pushed
+bool b_start_logging_status = false;
+bool b_stop_logging_status = false;
+bool logging_status = false;
+
 void loop(){
   byte registers[FT5206_NUMBER_OF_REGISTERS];
   byte prev_nr_of_touches = 0;
   word coordinates[10];
-
-  // ESTABLISH BUTTON COORDINATES
-  word SIZE_OF_BUTTONS[2] = {100,50};
-  word test_button[4] = {300, 300 + SIZE_OF_BUTTONS[0], 300, 300 + SIZE_OF_BUTTONS[1]};
+  String data = "";
+  dataFile = SD.open("datalog.txt", FILE_WRITE);
   if (cmt.touched()){
     cmt.getRegisterInfo(registers);
     nr_of_touches = cmt.getTouchPositions(coordinates,registers);
@@ -166,21 +184,45 @@ void loop(){
       Serial.println(y);
       //tft.fillCircle(x,y,10,RA8875_WHITE);
 
-      // CHECK FOR BUTTON PRESSES
-      withinBounds(x, y, test_button);
+      // CHECK FOR BUTTON PRESSES, LOGGING STATUS
+      b_start_logging_status = withinBounds(x, y, b_start_logging);
+      b_stop_logging_status = withinBounds(x, y, b_stop_logging);
+      if (logging_status == false && b_start_logging_status == true) {
+        logging_status = true;
+      }
+      else if (logging_status == true && b_stop_logging_status == true) {
+        logging_status = false;
+      }
+    }
+    if (logging_status) {
+      tft.textMode();
+      tft.textSetCursor(100,100);
+      tft.textColor(RA8875_WHITE, RA8875_BLACK);
+      tft.textWrite("start logging from button");
+      if ((millis() - log_timer) >= LOG_INTERVAL) {
+        data += String(1);//thermocouple0.readInternal());
+        data += ",";
+        data += String(1);//thermocouple1.readInternal());
+        data += ",";
+        data += "\n";
+        dataFile.println(data);
+        log_timer = millis();
+      }
+    }
+    else {
+      dataFile.close();
     }
     delay(10);
     memcpy(prev_coordinates, coordinates, 20);
     memcpy(transfer_coords, coordinates, 20);
   }
+  if (delt_status){
+    //updateStatus(current_condition);
+  }
 
-  // DRAW BUTTONS
-  //button.drawButton();
-  tft.graphicsMode();
-  tft.fillRect(int(test_button[0]),int(test_button[2]), SIZE_OF_BUTTONS[0], SIZE_OF_BUTTONS[1], RA8875_WHITE);
-  tft.graphicsMode();
 }
 
+// RTC AND SD INITIALIZATION FUNCTIONS
 void startRTC() {
   Wire.begin();
   RTC.begin();
@@ -206,12 +248,26 @@ void startSD() {
   }
   Serial.println("card initialized.");
 }
-void withinBounds(word x, word y, word bounds[]) { // determines if a touch is within a "button"'s bounds 
+
+// BUTTON FUNCTIONS
+bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
  
-    if (x > bounds[0] && x < bounds[1] && y > bounds[2] && y < bounds[3]){
-      tft.textMode();
-      tft.textSetCursor(50,10);
-      tft.textEnlarge(0);
-      tft.textWrite("Button touched.");
+  if (x > button[0] && x < button[1] && y > button[2] && y < button[3]){
+    return true;
+  }
+  else {
+    return false;
   }
 }
+
+void drawButton(int button[4], char strarr[]) {
+  tft.graphicsMode();
+  tft.fillRect(button[0], button[2], button[1]-button[0], button[3]-button[2], RA8875_WHITE);
+  tft.textMode();
+  tft.textSetCursor(button[0], button[2]);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_BLACK,RA8875_WHITE);
+  tft.textWrite(strarr);
+}
+
+// GUI FUNCTIONS
