@@ -1,11 +1,11 @@
 /***************************************************************************************
-arduinacq data acquisition and chart recording system
-with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
+  arduinacq data acquisition and chart recording system
+  with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
   2 Thermocouples (Adafruit MAX31855)
   Adafruit Data Logger Shield
 
 
- RA8875 communication, connect:
+  RA8875 communication, connect:
 
    TFTM070(40 pin)   Arduino UNO pin    Description
     1,2                                 GND
@@ -37,7 +37,7 @@ with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on
 #define RA8875_CS         7   // RA8875 chip select for ISP communication
 #define CTP_INT           2    // touch data ready for read from FT5x06 touch controller
 #define RA8875_RESET      9    // Adafruit library puts a short low reset pulse at startup on this pin.
-                               // Not relevant for TFTM070 according to doc.
+// Not relevant for TFTM070 according to doc.
 
 Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 FT5x06 cmt = FT5x06(CTP_INT);
@@ -78,14 +78,14 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 
 // Our logging interval in milliseconds, and timing/logging info
 #define LOG_INTERVAL 500
-File dataFile;
+
 unsigned long log_timer;
 
 // Button coordinates and sizing
-int BUTTONSIZE[2] = {100,50};
+int BUTTONSIZE[2] = {100, 50};
 // int button_name[4] = {leftx, rightx, topy, boty};
 int b_start_logging[4] = {20, 20 + BUTTONSIZE[0], 20, 20 + BUTTONSIZE[1]};
-int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2*BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
+int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2 * BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -114,15 +114,15 @@ void setup() {
   tft.fillScreen(RA8875_GREEN);
   tft.fillScreen(RA8875_BLUE);
   tft.fillScreen(RA8875_BLACK);
-  
+
   startRTC();
   startSD();
 
   // Open up the file we're going to log to!
-  dataFile = SD.open("datalog.txt", FILE_WRITE);
+  File dataFile = SD.open("datalog.csv", FILE_WRITE);
 
   if (! dataFile) {
-    Serial.println("error opening datalog.txt");
+    Serial.println("error opening datalog.csv");
     // Wait forever since we cant write data
     //while (1) ;
   }
@@ -141,7 +141,7 @@ void setup() {
   // GET TIMER LOG
   log_timer = millis();
   Serial.println("Setup done.");
-  
+
 }
 
 word prev_coordinates[10];
@@ -157,15 +157,14 @@ bool b_start_logging_status = false;
 bool b_stop_logging_status = false;
 bool logging_status = false;
 
-void loop(){
+void loop() {
   byte registers[FT5206_NUMBER_OF_REGISTERS];
   byte prev_nr_of_touches = 0;
   word coordinates[10];
   String data = "";
-  dataFile = SD.open("datalog.txt", FILE_WRITE);
-  if (cmt.touched()){
+  if (cmt.touched()) {
     cmt.getRegisterInfo(registers);
-    nr_of_touches = cmt.getTouchPositions(coordinates,registers);
+    nr_of_touches = cmt.getTouchPositions(coordinates, registers);
     prev_nr_of_touches = nr_of_touches;
 
     //for (byte i = 0 ; i < prev_nr_of_touches; i++){
@@ -174,8 +173,8 @@ void loop(){
     //  tft.fillCircle(x, y, 70, RA8875_BLACK);
     //}
 
-    for (byte i = 0; i < nr_of_touches; i++){
-      word x = coordinates[i*2];
+    for (byte i = 0; i < nr_of_touches; i++) {
+      word x = coordinates[i * 2];
       word y = coordinates[i * 2 + 1];
 
       Serial.println("coord x = ");
@@ -194,29 +193,33 @@ void loop(){
         logging_status = false;
       }
     }
-    if (logging_status) {
-      tft.textMode();
-      tft.textSetCursor(100,100);
-      tft.textColor(RA8875_WHITE, RA8875_BLACK);
-      tft.textWrite("start logging from button");
-      if ((millis() - log_timer) >= LOG_INTERVAL) {
-        data += String(1);//thermocouple0.readInternal());
-        data += ",";
-        data += String(1);//thermocouple1.readInternal());
-        data += ",";
-        data += "\n";
-        dataFile.println(data);
-        log_timer = millis();
-      }
-    }
-    else {
-      dataFile.close();
-    }
+
     delay(10);
     memcpy(prev_coordinates, coordinates, 20);
     memcpy(transfer_coords, coordinates, 20);
   }
-  if (delt_status){
+
+  File dataFile = SD.open("datalog.csv", FILE_WRITE);
+  if (logging_status) {
+    tft.textMode();
+    tft.textSetCursor(100, 100);
+    tft.textColor(RA8875_WHITE, RA8875_BLACK);
+    tft.textWrite("start logging from button");
+    if ((millis() - log_timer) >= LOG_INTERVAL) {
+      dataFile.print(thermocouple0.readInternal());
+      dataFile.print("\t");
+      dataFile.println(thermocouple1.readInternal());
+      log_timer = millis();
+    }
+  }
+  else {
+    tft.textMode();
+    tft.textSetCursor(100, 100);
+    tft.textColor(RA8875_WHITE, RA8875_BLACK);
+    tft.textWrite("stop logging from button");
+    dataFile.close();
+  }
+  if (delt_status) {
     //updateStatus(current_condition);
   }
 
@@ -241,7 +244,7 @@ void startSD() {
   pinMode(SS, OUTPUT);
 
   // see if the card is present and can be initialized:
-  if (!SD.begin(10,11,12,13)) { // pins connected from SD to Arduino
+  if (!SD.begin(10, 11, 12, 13)) { // pins connected from SD to Arduino
     Serial.println("Card failed, or not present");
     // don't do anything more:
     while (1) ;
@@ -251,8 +254,8 @@ void startSD() {
 
 // BUTTON FUNCTIONS
 bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
- 
-  if (x > button[0] && x < button[1] && y > button[2] && y < button[3]){
+
+  if (x > button[0] && x < button[1] && y > button[2] && y < button[3]) {
     return true;
   }
   else {
@@ -262,11 +265,11 @@ bool withinBounds(int x, int y, int button[4]) { // determines if a touch is wit
 
 void drawButton(int button[4], char strarr[]) {
   tft.graphicsMode();
-  tft.fillRect(button[0], button[2], button[1]-button[0], button[3]-button[2], RA8875_WHITE);
+  tft.fillRect(button[0], button[2], button[1] - button[0], button[3] - button[2], RA8875_WHITE);
   tft.textMode();
   tft.textSetCursor(button[0], button[2]);
   tft.textEnlarge(0);
-  tft.textColor(RA8875_BLACK,RA8875_WHITE);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
   tft.textWrite(strarr);
 }
 
