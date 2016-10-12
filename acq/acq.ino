@@ -108,7 +108,7 @@ void setup() {
   tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
   tft.PWM1out(255);
 
-  //visual cue to show that the screen works
+  // visual cue to show that the screen works
   tft.fillScreen(RA8875_BLACK);
   tft.fillScreen(RA8875_RED);
   tft.fillScreen(RA8875_GREEN);
@@ -117,6 +117,10 @@ void setup() {
 
   startRTC();
   startSD();
+
+  // clear message area
+  tft.graphicsMode();
+  tft.fillRect(500, 20, 300, 20, RA8875_BLACK);
 
   // Open up the file we're going to log to!
   File dataFile = SD.open("datalog.csv", FILE_WRITE);
@@ -148,14 +152,14 @@ word prev_coordinates[10];
 word transfer_coords[10];
 byte nr_of_touches = 0;
 
-// used to update the status line in touch gui
-bool delt_status = false;
-char current_condition[ ] = "";
+
 
 // status of button pushed
 bool b_start_logging_status = false;
 bool b_stop_logging_status = false;
 bool logging_status = false;
+
+// whether a new message was written (need to wipe to display more)
 
 void loop() {
   byte registers[FT5206_NUMBER_OF_REGISTERS];
@@ -176,7 +180,7 @@ void loop() {
     for (byte i = 0; i < nr_of_touches; i++) {
       word x = coordinates[i * 2];
       word y = coordinates[i * 2 + 1];
-
+      //DEBUG
       Serial.println("coord x = ");
       Serial.println(x);
       Serial.println("coord y = ");
@@ -188,9 +192,11 @@ void loop() {
       b_stop_logging_status = withinBounds(x, y, b_stop_logging);
       if (logging_status == false && b_start_logging_status == true) {
         logging_status = true;
+        Serial.println("logging status true");//DEBUG
       }
       else if (logging_status == true && b_stop_logging_status == true) {
         logging_status = false;
+        Serial.println("logging status false");//DEBUG
       }
     }
 
@@ -200,27 +206,42 @@ void loop() {
   }
 
   File dataFile = SD.open("datalog.csv", FILE_WRITE);
+
   if (logging_status) {
-    tft.textMode();
-    tft.textSetCursor(100, 100);
-    tft.textColor(RA8875_WHITE, RA8875_BLACK);
-    tft.textWrite("start logging from button");
+    updateStatus("Logging running.        ");
     if ((millis() - log_timer) >= LOG_INTERVAL) {
+      DateTime now = RTC.now();
+      Serial.println("attempting to write to log"); //DEBUG
+      dataFile.print(now.year(), DEC);
+      dataFile.print(now.month(), DEC);
+      dataFile.print(now.day(), DEC);
+      dataFile.print("\t");
+      dataFile.print(now.hour(), DEC);
+      dataFile.print(':');
+      dataFile.print(now.minute(), DEC);
+      dataFile.print(':');
+      dataFile.print(now.second(), DEC);
+      dataFile.print("\t");
+      dataFile.print(analogRead(A0) * 4.883); // conversion from 0-1024 value to mV
+      dataFile.print("\t");
+      dataFile.print(analogRead(A1) * 4.883);
+      dataFile.print("\t");
+      dataFile.print(analogRead(A2) * 4.883);
+      dataFile.print("\t");
+      dataFile.print(analogRead(A3) * 4.883);
+      dataFile.print("\t");
       dataFile.print(thermocouple0.readInternal());
       dataFile.print("\t");
       dataFile.println(thermocouple1.readInternal());
+      updateGraph();
       log_timer = millis();
     }
-  }
-  else {
-    tft.textMode();
-    tft.textSetCursor(100, 100);
-    tft.textColor(RA8875_WHITE, RA8875_BLACK);
-    tft.textWrite("stop logging from button");
     dataFile.close();
   }
-  if (delt_status) {
-    //updateStatus(current_condition);
+  else {
+    tft.graphicsMode();
+    updateStatus("Logging stopped.        ");
+    dataFile.close();
   }
 
 }
@@ -232,6 +253,7 @@ void startRTC() {
 
   if (! RTC.isrunning()) {
     Serial.println("RTC is NOT running!");
+
     // following line sets the RTC to the date & time this sketch was compiled
     RTC.adjust(DateTime(__DATE__, __TIME__));
   }
@@ -246,10 +268,14 @@ void startSD() {
   // see if the card is present and can be initialized:
   if (!SD.begin(10, 11, 12, 13)) { // pins connected from SD to Arduino
     Serial.println("Card failed, or not present");
+    updateStatus("No SD card. Insert and reboot.");
     // don't do anything more:
     while (1) ;
   }
-  Serial.println("card initialized.");
+  else {
+    Serial.println("card initialized.");
+    updateStatus("SD card initialized.    ");
+  }
 }
 
 // BUTTON FUNCTIONS
@@ -274,3 +300,16 @@ void drawButton(int button[4], char strarr[]) {
 }
 
 // GUI FUNCTIONS
+void updateStatus(char update_cond[]) {
+  tft.textMode();
+  tft.textSetCursor(500, 20);
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textWrite(update_cond);
+}
+
+void updateGraph() { // modify to actually get inputs haha
+  tft.drawLine(100, 450, 750, 450, RA8875_WHITE);
+  tft.drawLine(100, 100, 100, 450, RA8875_WHITE);
+
+}
+
