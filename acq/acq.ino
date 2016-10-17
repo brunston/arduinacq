@@ -132,9 +132,10 @@ void setup() {
   }
   dataFile.close();
 
-  // DRAW BUTTONS
+  // DRAW GUI
   drawButton(b_start_logging, "start log");
   drawButton(b_stop_logging, "stop log");
+  makeGraph();
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -158,8 +159,11 @@ byte nr_of_touches = 0;
 bool b_start_logging_status = false;
 bool b_stop_logging_status = false;
 bool logging_status = false;
+int record_interval = 500;
 
-// whether a new message was written (need to wipe to display more)
+// array of maxmin data for graph resizing
+int resize_data[41][6]; // we want to store each of these maxmins for our whole graph width (16*41)
+int every_16[16][6]; // we want to get max min of every 16 data point chunk
 
 void loop() {
   byte registers[FT5206_NUMBER_OF_REGISTERS];
@@ -192,6 +196,7 @@ void loop() {
       b_stop_logging_status = withinBounds(x, y, b_stop_logging);
       if (logging_status == false && b_start_logging_status == true) {
         logging_status = true;
+        makeGraph();
         Serial.println("logging status true");//DEBUG
       }
       else if (logging_status == true && b_stop_logging_status == true) {
@@ -211,6 +216,7 @@ void loop() {
     updateStatus("Logging running.        ");
     if ((millis() - log_timer) >= LOG_INTERVAL) {
       DateTime now = RTC.now();
+      float d_vals[6] = {analogRead(A0), analogRead(A1), analogRead(A2), analogRead(A3), thermocouple0.readInternal(), thermocouple1.readInternal()};
       Serial.println("attempting to write to log"); //DEBUG
       dataFile.print(now.year(), DEC);
       dataFile.print(now.month(), DEC);
@@ -222,18 +228,20 @@ void loop() {
       dataFile.print(':');
       dataFile.print(now.second(), DEC);
       dataFile.print("\t");
-      dataFile.print(analogRead(A0) * 4.883); // conversion from 0-1024 value to mV
+      dataFile.print(d_vals[0] * 4.883); // conversion from 0-1024 value to mV
       dataFile.print("\t");
-      dataFile.print(analogRead(A1) * 4.883);
+      dataFile.print(d_vals[1] * 4.883);
       dataFile.print("\t");
-      dataFile.print(analogRead(A2) * 4.883);
+      dataFile.print(d_vals[2] * 4.883);
       dataFile.print("\t");
-      dataFile.print(analogRead(A3) * 4.883);
+      dataFile.print(d_vals[3] * 4.883);
       dataFile.print("\t");
-      dataFile.print(thermocouple0.readInternal());
+      dataFile.print(d_vals[4]);
       dataFile.print("\t");
-      dataFile.println(thermocouple1.readInternal());
-      updateGraph();
+      dataFile.println(d_vals[5]);
+      if ((millis() - log_timer) >= record_interval) {
+        updateGraph(d_vals[0], d_vals[1], d_vals[2], d_vals[3], d_vals[4], d_vals[5]);
+      }
       log_timer = millis();
     }
     dataFile.close();
@@ -278,7 +286,14 @@ void startSD() {
   }
 }
 
-// BUTTON FUNCTIONS
+// GUI FUNCTIONS
+void updateStatus(char update_cond[]) {
+  tft.textMode();
+  tft.textSetCursor(500, 20);
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textWrite(update_cond);
+}
+
 bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
 
   if (x > button[0] && x < button[1] && y > button[2] && y < button[3]) {
@@ -287,6 +302,27 @@ bool withinBounds(int x, int y, int button[4]) { // determines if a touch is wit
   else {
     return false;
   }
+}
+
+int graphCursorX = 101; // change each time we write a new pixel of data.
+void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1) {
+  if (graphCursorX == 750) {
+    while (1); //temporary while I implement the rest of this functionality.
+  }
+  tft.graphicsMode();
+  // 450 - is because screen is upper-left 0,0 indexed;
+  // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
+  // * 0.07 is pixels per mV; + 0.5 is for rounding; .
+  tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
+  tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
+  tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
+  tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
+  tft.drawPixel(graphCursorX, int(450 - dat_t0 * 3.5 + 0.5), RA8875_RED);
+  tft.drawPixel(graphCursorX, int(450 - dat_t1 * 3.5 + 0.5), RA8875_MAGENTA);
+  graphCursorX = graphCursorX + 1;
+}
+
+void horizShrinkGraph() { // when we reach the limit of our graph display, shift everything over.
 }
 
 void drawButton(int button[4], char strarr[]) {
@@ -299,17 +335,95 @@ void drawButton(int button[4], char strarr[]) {
   tft.textWrite(strarr);
 }
 
-// GUI FUNCTIONS
-void updateStatus(char update_cond[]) {
+void makeGraph() {
+  // clear graph area, reset graphCursor
+  tft.fillRect(100, 100, 650, 350, RA8875_BLACK);
+  graphCursorX = 101;
+  
   tft.textMode();
-  tft.textSetCursor(500, 20);
-  tft.textColor(RA8875_WHITE, RA8875_BLACK);
-  tft.textWrite(update_cond);
-}
+  tft.textSetCursor(350, 10);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
+  tft.textWrite("arduinacq");
 
-void updateGraph() { // modify to actually get inputs haha
+  tft.textSetCursor(310, 30);
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textWrite("Color Legend");
+  tft.textSetCursor(310, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textWrite("A0");
+  tft.textSetCursor(330, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_YELLOW, RA8875_BLACK);
+  tft.textWrite("A1");
+  tft.textSetCursor(350, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_GREEN, RA8875_BLACK);
+  tft.textWrite("A2");
+  tft.textSetCursor(370, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_CYAN, RA8875_BLACK);
+  tft.textWrite("A3");
+  tft.textSetCursor(390, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_RED, RA8875_BLACK);
+  tft.textWrite("T0");
+  tft.textSetCursor(410, 50);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_MAGENTA, RA8875_BLACK);
+  tft.textWrite("T1");
+
+  tft.textSetCursor(20, 80);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
+  tft.textWrite("Volt.");
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textSetCursor(20, 100);
+  tft.textWrite("5000[mV]");
+  tft.textSetCursor(20, 170);
+  tft.textWrite("4000[mV]");
+  tft.textSetCursor(20, 240);
+  tft.textWrite("3000[mV]");
+  tft.textSetCursor(20, 310);
+  tft.textWrite("2000[mV]");
+  tft.textSetCursor(20, 380);
+  tft.textWrite("1000[mV]");
+  tft.textSetCursor(20, 440);
+  tft.textWrite("0[mV]");
+  tft.textSetCursor(751, 80);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
+  tft.textWrite("Temp.");
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textSetCursor(761, 100);
+  tft.textWrite("100c");
+  tft.textSetCursor(761, 170);
+  tft.textWrite("80 c");
+  tft.textSetCursor(761, 240);
+  tft.textWrite("60 c");
+  tft.textSetCursor(761, 310);
+  tft.textWrite("40 c");
+  tft.textSetCursor(761, 380);
+  tft.textWrite("20 c");
+  tft.textSetCursor(761, 440);
+  tft.textWrite("0 c");
+
+  tft.graphicsMode();
   tft.drawLine(100, 450, 750, 450, RA8875_WHITE);
   tft.drawLine(100, 100, 100, 450, RA8875_WHITE);
 
-}
+  tft.drawLine(90, 100, 100, 100, RA8875_WHITE);
+  tft.drawLine(90, 170, 100, 170, RA8875_WHITE);
+  tft.drawLine(90, 240, 100, 240, RA8875_WHITE);
+  tft.drawLine(90, 310, 100, 310, RA8875_WHITE);
+  tft.drawLine(90, 380, 100, 380, RA8875_WHITE);
+  tft.drawLine(90, 450, 100, 450, RA8875_WHITE);
+  
+  tft.drawLine(750, 100, 760, 100, RA8875_WHITE);
+  tft.drawLine(750, 170, 760, 170, RA8875_WHITE);
+  tft.drawLine(750, 240, 760, 240, RA8875_WHITE);
+  tft.drawLine(750, 310, 760, 310, RA8875_WHITE);
+  tft.drawLine(750, 380, 760, 380, RA8875_WHITE);
+  tft.drawLine(750, 450, 760, 450, RA8875_WHITE);
 
+}
