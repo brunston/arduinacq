@@ -81,11 +81,29 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 
 unsigned long log_timer;
 
-// Button coordinates and sizing
+// BUTTON INITIALIZATION
 int BUTTONSIZE[2] = {100, 50};
 // int button_name[4] = {leftx, rightx, topy, boty};
 int b_start_logging[4] = {20, 20 + BUTTONSIZE[0], 20, 20 + BUTTONSIZE[1]};
 int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2 * BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
+int b_incr_time[4] = {130, 130 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
+int b_decr_time[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 120 , 120 + BUTTONSIZE[1]};
+int b_incr_temp[4] = {130, 130 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
+int b_decr_temp[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 220 , 220 + BUTTONSIZE[1]};
+int b_plot_mean[4] = {130, 130 + BUTTONSIZE[0], 320, 320 + BUTTONSIZE[1]};
+int b_plot_mxmn[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
+int b_plot_inst[4] = {130 + 2*BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
+
+// BUTTON STATUS
+bool b_start_logging_status = false;
+bool b_stop_logging_status = false;
+bool b_incr_time_status = false;
+bool b_decr_time_status = false;
+bool b_incr_temp_status = false;
+bool b_decr_temp_status = false;
+bool b_plot_mean_status = false;
+bool b_plot_mxmn_status = false;
+bool b_plot_inst_status = false;
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -108,7 +126,7 @@ void setup() {
   tft.PWM1config(true, RA8875_PWM_CLK_DIV1024); // PWM output for backlight
   tft.PWM1out(255);
 
-  // visual cue to show that the screen works
+  // SCREEN STARTUP
   tft.fillScreen(RA8875_BLACK);
   tft.fillScreen(RA8875_RED);
   tft.fillScreen(RA8875_GREEN);
@@ -135,7 +153,13 @@ void setup() {
   // DRAW GUI
   drawButton(b_start_logging, "start log");
   drawButton(b_stop_logging, "stop log");
-  makeGraph();
+  drawButton(b_incr_time, "time (+ 1hr)");
+  drawButton(b_decr_time, "time (- 1hr)");
+  drawButton(b_incr_temp, "temp (+ 20c)");
+  drawButton(b_decr_temp, "temp (- 20c)");
+  drawButton(b_plot_mean, "mean plot");
+  drawButton(b_plot_mxmn, "mxmn plot");
+  drawButton(b_plot_inst, "inst plot");
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -155,13 +179,12 @@ byte nr_of_touches = 0;
 
 
 
-// status of button pushed
-bool b_start_logging_status = false;
-bool b_stop_logging_status = false;
+// status of button pushed and gui status
 bool logging_status = false;
+bool init_screen = true;
 int record_interval = 500;
 
-// array of maxmin data for graph resizing
+// array of maxmin data for graph resizing REMOVE? POST-161019 GUI DISCUSSION
 int resize_data[41][6]; // we want to store each of these maxmins for our whole graph width (16*41)
 int every_16[16][6]; // we want to get max min of every 16 data point chunk
 
@@ -170,6 +193,7 @@ void loop() {
   byte prev_nr_of_touches = 0;
   word coordinates[10];
   String data = "";
+  // HANDLE TOUCH EVENTS
   if (cmt.touched()) {
     cmt.getRegisterInfo(registers);
     nr_of_touches = cmt.getTouchPositions(coordinates, registers);
@@ -194,14 +218,25 @@ void loop() {
       // CHECK FOR BUTTON PRESSES, LOGGING STATUS
       b_start_logging_status = withinBounds(x, y, b_start_logging);
       b_stop_logging_status = withinBounds(x, y, b_stop_logging);
+      
       if (logging_status == false && b_start_logging_status == true) {
         logging_status = true;
+        init_screen == false;
         makeGraph();
         Serial.println("logging status true");//DEBUG
       }
       else if (logging_status == true && b_stop_logging_status == true) {
         logging_status = false;
         Serial.println("logging status false");//DEBUG
+      }
+      if (init_screen) {
+        b_incr_time_status = withinBounds(x, y, b_incr_time);
+        b_decr_time_status = withinBounds(x, y, b_decr_time);
+        b_incr_temp_status = withinBounds(x, y, b_incr_temp);
+        b_decr_time_status = withinBounds(x, y, b_decr_temp);
+        b_plot_mean_status = withinBounds(x, y, b_plot_mean);
+        b_plot_mxmn_status = withinBounds(x, y, b_plot_mxmn);
+        b_plot_inst_status = withinBounds(x, y, b_plot_inst);
       }
     }
 
@@ -211,7 +246,16 @@ void loop() {
   }
 
   File dataFile = SD.open("datalog.csv", FILE_WRITE);
-
+  if (init_screen) {
+    tft.textMode();
+    tft.textSetCursor(350, 10);
+    tft.textEnlarge(0);
+    tft.textColor(RA8875_BLACK, RA8875_WHITE);
+    tft.textWrite("arduinacq");
+    tft.textSetCursor(360, 100);
+    tft.textColor(RA8875_BLACK, RA8875_WHITE);
+    tft.textWrite("INITSCR");
+  }
   if (logging_status) {
     updateStatus("Logging running.        ");
     if ((millis() - log_timer) >= LOG_INTERVAL) {
@@ -339,7 +383,7 @@ void makeGraph() {
   // clear graph area, reset graphCursor
   tft.fillRect(100, 100, 650, 350, RA8875_BLACK);
   graphCursorX = 101;
-  
+
   tft.textMode();
   tft.textSetCursor(350, 10);
   tft.textEnlarge(0);
@@ -418,7 +462,7 @@ void makeGraph() {
   tft.drawLine(90, 310, 100, 310, RA8875_WHITE);
   tft.drawLine(90, 380, 100, 380, RA8875_WHITE);
   tft.drawLine(90, 450, 100, 450, RA8875_WHITE);
-  
+
   tft.drawLine(750, 100, 760, 100, RA8875_WHITE);
   tft.drawLine(750, 170, 760, 170, RA8875_WHITE);
   tft.drawLine(750, 240, 760, 240, RA8875_WHITE);
