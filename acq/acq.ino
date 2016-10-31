@@ -80,6 +80,7 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 #define LOG_INTERVAL 500
 
 unsigned long log_timer;
+unsigned long init_timer;
 
 // BUTTON INITIALIZATION
 int BUTTONSIZE[2] = {100, 50};
@@ -88,22 +89,27 @@ int b_start_logging[4] = {20, 20 + BUTTONSIZE[0], 20, 20 + BUTTONSIZE[1]};
 int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2 * BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
 int b_incr_time[4] = {130, 130 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
 int b_decr_time[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 120 , 120 + BUTTONSIZE[1]};
-int b_incr_temp[4] = {130, 130 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
-int b_decr_temp[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 220 , 220 + BUTTONSIZE[1]};
-int b_plot_mean[4] = {130, 130 + BUTTONSIZE[0], 320, 320 + BUTTONSIZE[1]};
-int b_plot_mxmn[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
-int b_plot_inst[4] = {130 + 2*BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
+int b_incr_temp_lo[4] = {130, 130 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
+int b_decr_temp_lo[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 220 , 220 + BUTTONSIZE[1]};
+int b_incr_temp_hi[4] = {130, 130 + BUTTONSIZE[0], 320, 320 + BUTTONSIZE[1]};
+int b_decr_temp_hi[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
+int b_plot_mean[4] = {350, 350 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
+int b_plot_mxmn[4] = {350, 350 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
+int b_plot_inst[4] = {130 + 2*BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 20, 320 , 320 + BUTTONSIZE[1]};
 
 // BUTTON STATUS
 bool b_start_logging_status = false;
 bool b_stop_logging_status = false;
-bool b_incr_time_status = false;
-bool b_decr_time_status = false;
-bool b_incr_temp_status = false;
-bool b_decr_temp_status = false;
-bool b_plot_mean_status = false;
-bool b_plot_mxmn_status = false;
-bool b_plot_inst_status = false;
+
+#define BTIME 0
+#define BTEMPLO 1
+#define BTEMPHI 2
+int b_graphlimits[3] = {12, 0, 100};
+
+#define BPLOTMEAN 0
+#define BPLOTMXMN 1
+#define BPLOTINST 2
+int b_plottype;
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -142,6 +148,8 @@ void setup() {
 
   // Open up the file we're going to log to!
   File dataFile = SD.open("datalog.csv", FILE_WRITE);
+  DateTime now = RTC.now();
+  String nfn = String(String(now.year(), DEC) + String(now.month(), DEC) + String(now.day(), DEC) + "-" + String(now.hour(), DEC) + String(now.minute(), DEC) + String(now.second(), DEC));
 
   if (! dataFile) {
     Serial.println("error opening datalog.csv");
@@ -155,8 +163,10 @@ void setup() {
   drawButton(b_stop_logging, "stop log");
   drawButton(b_incr_time, "time (+ 1hr)");
   drawButton(b_decr_time, "time (- 1hr)");
-  drawButton(b_incr_temp, "temp (+ 20c)");
-  drawButton(b_decr_temp, "temp (- 20c)");
+  drawButton(b_incr_temp_lo, "temp lo +20c");
+  drawButton(b_decr_temp_lo, "temp lo -20c");
+  drawButton(b_incr_temp_hi, "temp hi +20c");
+  drawButton(b_decr_temp_hi, "temp hi -20c");
   drawButton(b_plot_mean, "mean plot");
   drawButton(b_plot_mxmn, "mxmn plot");
   drawButton(b_plot_inst, "inst plot");
@@ -183,6 +193,7 @@ byte nr_of_touches = 0;
 bool logging_status = false;
 bool init_screen = true;
 int record_interval = 500;
+int init_interval = 200;
 
 // array of maxmin data for graph resizing REMOVE? POST-161019 GUI DISCUSSION
 int resize_data[41][6]; // we want to store each of these maxmins for our whole graph width (16*41)
@@ -218,25 +229,46 @@ void loop() {
       // CHECK FOR BUTTON PRESSES, LOGGING STATUS
       b_start_logging_status = withinBounds(x, y, b_start_logging);
       b_stop_logging_status = withinBounds(x, y, b_stop_logging);
+      if (init_screen && ((millis() - init_timer) >= init_interval)) {
+        if (withinBounds(x, y, b_incr_time)) {
+          b_graphlimits[BTIME] += 1;
+        }
+        if (withinBounds(x, y, b_decr_time)) {
+          b_graphlimits[BTIME] -= 1;
+        }
+        if (withinBounds(x, y, b_incr_temp_lo)) {
+          b_graphlimits[BTEMPLO] += 20;
+        }
+        if (withinBounds(x, y, b_decr_temp_lo)) {
+          b_graphlimits[BTEMPLO] -= 20;
+        }
+        if (withinBounds(x, y, b_incr_temp_hi)) {
+          b_graphlimits[BTEMPHI] += 20;
+        }
+        if (withinBounds(x, y, b_decr_temp_hi)) {
+          b_graphlimits[BTEMPHI] -= 20;
+        }
+        if (withinBounds(x, y, b_plot_mean)) {
+          b_plottype = BPLOTMEAN;
+        }
+        if (withinBounds(x, y, b_plot_mxmn)) {
+          b_plottype = BPLOTMXMN;
+        }
+        if (withinBounds(x, y, b_plot_inst)) {
+          b_plottype = BPLOTINST;
+        }
+        init_timer = millis();
+      }
       
       if (logging_status == false && b_start_logging_status == true) {
         logging_status = true;
-        init_screen == false;
+        init_screen = false;
         makeGraph();
         Serial.println("logging status true");//DEBUG
       }
       else if (logging_status == true && b_stop_logging_status == true) {
         logging_status = false;
         Serial.println("logging status false");//DEBUG
-      }
-      if (init_screen) {
-        b_incr_time_status = withinBounds(x, y, b_incr_time);
-        b_decr_time_status = withinBounds(x, y, b_decr_time);
-        b_incr_temp_status = withinBounds(x, y, b_incr_temp);
-        b_decr_time_status = withinBounds(x, y, b_decr_temp);
-        b_plot_mean_status = withinBounds(x, y, b_plot_mean);
-        b_plot_mxmn_status = withinBounds(x, y, b_plot_mxmn);
-        b_plot_inst_status = withinBounds(x, y, b_plot_inst);
       }
     }
 
@@ -255,6 +287,7 @@ void loop() {
     tft.textSetCursor(360, 100);
     tft.textColor(RA8875_BLACK, RA8875_WHITE);
     tft.textWrite("INITSCR");
+    updateInitStatus();
   }
   if (logging_status) {
     updateStatus("Logging running.        ");
@@ -338,21 +371,52 @@ void updateStatus(char update_cond[]) {
   tft.textWrite(update_cond);
 }
 
-bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
+void updateInitStatus() {
+  tft.textMode();
+  tft.textSetCursor(500, 110);
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textWrite("Time:");
+  tft.textSetCursor(580, 110);
+  tft.textWrite("     ");
+  tft.textSetCursor(580, 110);
+  tft.print(b_graphlimits[BTIME]);
+  tft.textSetCursor(500, 130);
+  tft.textWrite("Temp (lo):");
+  tft.textSetCursor(580, 130);
+  tft.textWrite("     ");
+  tft.textSetCursor(580, 130);
+  tft.print(b_graphlimits[BTEMPLO]);
+  tft.textSetCursor(500, 150);
+  tft.textWrite("Temp (hi):");
+  tft.textSetCursor(580, 150);
+  tft.textWrite("     ");
+  tft.textSetCursor(580, 150);
+  tft.print(b_graphlimits[BTEMPHI]);
+  tft.textSetCursor(500, 170);
+  tft.textWrite("Plot:");
+  tft.textSetCursor(580, 170);
+  tft.textWrite("     ");
+  tft.textSetCursor(580, 170);
+  if (b_plottype == BPLOTMEAN) {
+    tft.textWrite("mean");
+  }
+  else if (b_plottype == BPLOTMXMN) {
+    tft.textWrite("mxmn");
+  }
+  else if (b_plottype == BPLOTINST) {
+    tft.textWrite("inst");
+  }
+}
 
-  if (x > button[0] && x < button[1] && y > button[2] && y < button[3]) {
-    return true;
-  }
-  else {
-    return false;
-  }
+bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
+  return (x > button[0] && x < button[1] && y > button[2] && y < button[3]);
 }
 
 int graphCursorX = 101; // change each time we write a new pixel of data.
 void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1) {
-  if (graphCursorX == 750) {
-    while (1); //temporary while I implement the rest of this functionality.
-  }
+//  if (graphCursorX == 750) {
+//    while (1); //temporary while I implement the rest of this functionality.
+//  }
   tft.graphicsMode();
   // 450 - is because screen is upper-left 0,0 indexed;
   // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
@@ -364,9 +428,6 @@ void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float d
   tft.drawPixel(graphCursorX, int(450 - dat_t0 * 3.5 + 0.5), RA8875_RED);
   tft.drawPixel(graphCursorX, int(450 - dat_t1 * 3.5 + 0.5), RA8875_MAGENTA);
   graphCursorX = graphCursorX + 1;
-}
-
-void horizShrinkGraph() { // when we reach the limit of our graph display, shift everything over.
 }
 
 void drawButton(int button[4], char strarr[]) {
