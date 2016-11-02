@@ -111,6 +111,10 @@ int b_graphlimits[3] = {12, 0, 100};
 #define BPLOTINST 2
 int b_plottype;
 
+//OUR DATAFILE NAME
+char filename[13];
+File dataFile;
+
 void setup() {
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
@@ -146,13 +150,27 @@ void setup() {
   tft.graphicsMode();
   tft.fillRect(500, 20, 300, 20, RA8875_BLACK);
 
-  // Open up the file we're going to log to!
-  File dataFile = SD.open("datalog.csv", FILE_WRITE);
+  // Open up the file we're going to log to! Use current date and a-z to differentiate each startup!
+  
   DateTime now = RTC.now();
-  String nfn = String(String(now.year(), DEC) + String(now.month(), DEC) + String(now.day(), DEC) + "-" + String(now.hour(), DEC) + String(now.minute(), DEC) + String(now.second(), DEC));
-
+  Serial.println("synced time");
+  char yr[5];
+  sprintf(yr, "%04u", now.year());
+  sprintf(filename,"%c%c%02u%02u-A.CSV",yr[2],yr[3],now.month(),now.day());
+  
+  for (uint8_t i = 0; i < 25; i++) {
+    char letters[26] = "abcdefghijklmnopqrstuvwxyz";
+    filename[7] = letters[i];
+    if (! SD.exists(filename)) {
+      dataFile = SD.open(filename, FILE_WRITE);
+      break;
+    }
+  }
+  
+  Serial.println(filename);
+  dataFile = SD.open(filename, FILE_WRITE);
   if (! dataFile) {
-    Serial.println("error opening datalog.csv");
+    Serial.println("error opening our .csv");
     // Wait forever since we cant write data
     //while (1) ;
   }
@@ -192,7 +210,7 @@ byte nr_of_touches = 0;
 // status of button pushed and gui status
 bool logging_status = false;
 bool init_screen = true;
-int record_interval = 500;
+int graph_interval = 5547 * b_graphlimits[BTIME]; // milliseconds per pixel per hour (to adjust by initscr)
 int init_interval = 200;
 
 // array of maxmin data for graph resizing REMOVE? POST-161019 GUI DISCUSSION
@@ -277,7 +295,7 @@ void loop() {
     memcpy(transfer_coords, coordinates, 20);
   }
 
-  File dataFile = SD.open("datalog.csv", FILE_WRITE);
+  File dataFile = SD.open(filename, FILE_WRITE);
   if (init_screen) {
     tft.textMode();
     tft.textSetCursor(350, 10);
@@ -316,8 +334,8 @@ void loop() {
       dataFile.print(d_vals[4]);
       dataFile.print("\t");
       dataFile.println(d_vals[5]);
-      if ((millis() - log_timer) >= record_interval) {
-        updateGraph(d_vals[0], d_vals[1], d_vals[2], d_vals[3], d_vals[4], d_vals[5]);
+      if ((millis() - log_timer) >= graph_interval) {
+        updateGraph(d_vals[0], d_vals[1], d_vals[2], d_vals[3], d_vals[4], d_vals[5], b_plottype);
       }
       log_timer = millis();
     }
@@ -371,6 +389,42 @@ void updateStatus(char update_cond[]) {
   tft.textWrite(update_cond);
 }
 
+bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
+  return (x > button[0] && x < button[1] && y > button[2] && y < button[3]);
+}
+
+int graphCursorX = 101; // change each time we write a new pixel of data.
+float ug_cma = 0; // cumulative moving average for mean plottype
+float ug_mx = 0; // mxmn maximum
+float ug_mn = 0; // mxmn minimum
+void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1, int plot_type) {
+//  if (graphCursorX == 750) {
+//    while (1); //temporary while I implement the rest of this functionality.
+//  }
+  
+  tft.graphicsMode();
+  // 450 - is because screen is upper-left 0,0 indexed;
+  // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
+  // * 0.07 is pixels per mV; + 0.5 is for rounding; .
+  tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
+  tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
+  tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
+  tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
+  tft.drawPixel(graphCursorX, int(450 - dat_t0 * 3.5 + 0.5), RA8875_RED);
+  tft.drawPixel(graphCursorX, int(450 - dat_t1 * 3.5 + 0.5), RA8875_MAGENTA);
+  graphCursorX = graphCursorX + 1;
+}
+
+void drawButton(int button[4], char strarr[]) {
+  tft.graphicsMode();
+  tft.fillRect(button[0], button[2], button[1] - button[0], button[3] - button[2], RA8875_WHITE);
+  tft.textMode();
+  tft.textSetCursor(button[0], button[2]);
+  tft.textEnlarge(0);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
+  tft.textWrite(strarr);
+}
+
 void updateInitStatus() {
   tft.textMode();
   tft.textSetCursor(500, 110);
@@ -406,38 +460,6 @@ void updateInitStatus() {
   else if (b_plottype == BPLOTINST) {
     tft.textWrite("inst");
   }
-}
-
-bool withinBounds(int x, int y, int button[4]) { // determines if a touch is within a "button"'s bound
-  return (x > button[0] && x < button[1] && y > button[2] && y < button[3]);
-}
-
-int graphCursorX = 101; // change each time we write a new pixel of data.
-void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1) {
-//  if (graphCursorX == 750) {
-//    while (1); //temporary while I implement the rest of this functionality.
-//  }
-  tft.graphicsMode();
-  // 450 - is because screen is upper-left 0,0 indexed;
-  // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
-  // * 0.07 is pixels per mV; + 0.5 is for rounding; .
-  tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
-  tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
-  tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
-  tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
-  tft.drawPixel(graphCursorX, int(450 - dat_t0 * 3.5 + 0.5), RA8875_RED);
-  tft.drawPixel(graphCursorX, int(450 - dat_t1 * 3.5 + 0.5), RA8875_MAGENTA);
-  graphCursorX = graphCursorX + 1;
-}
-
-void drawButton(int button[4], char strarr[]) {
-  tft.graphicsMode();
-  tft.fillRect(button[0], button[2], button[1] - button[0], button[3] - button[2], RA8875_WHITE);
-  tft.textMode();
-  tft.textSetCursor(button[0], button[2]);
-  tft.textEnlarge(0);
-  tft.textColor(RA8875_BLACK, RA8875_WHITE);
-  tft.textWrite(strarr);
 }
 
 void makeGraph() {
