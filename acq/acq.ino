@@ -125,7 +125,7 @@ void setup() {
   //starting TFT
   Serial.println("Trying to initialize RA8875 though SPI");
   if (!tft.begin(RA8875_800x480)) {
-    Serial.println("RA8875 Not Found!");
+    Serial.println("RA8875 Not Found! Aborting...");
     while (1);
   }
 
@@ -157,7 +157,8 @@ void setup() {
   char yr[5];
   sprintf(yr, "%04u", now.year());
   sprintf(filename,"%c%c%02u%02u-A.CSV",yr[2],yr[3],now.month(),now.day());
-  
+
+  // if there is already a file with a certain letter appended, move to next letter.
   for (uint8_t i = 0; i < 25; i++) {
     char letters[26] = "abcdefghijklmnopqrstuvwxyz";
     filename[7] = letters[i];
@@ -171,23 +172,11 @@ void setup() {
   dataFile = SD.open(filename, FILE_WRITE);
   if (! dataFile) {
     Serial.println("error opening our .csv");
-    // Wait forever since we cant write data
-    //while (1) ;
   }
   dataFile.close();
 
   // DRAW GUI
-  drawButton(b_start_logging, "start log");
-  drawButton(b_stop_logging, "stop log");
-  drawButton(b_incr_time, "time (+ 1hr)");
-  drawButton(b_decr_time, "time (- 1hr)");
-  drawButton(b_incr_temp_lo, "temp lo +20c");
-  drawButton(b_decr_temp_lo, "temp lo -20c");
-  drawButton(b_incr_temp_hi, "temp hi +20c");
-  drawButton(b_decr_temp_hi, "temp hi -20c");
-  drawButton(b_plot_mean, "mean plot");
-  drawButton(b_plot_mxmn, "mxmn plot");
-  drawButton(b_plot_inst, "inst plot");
+  initGUI();
 
   // basic readout test, just print the current temp
   Serial.print("Internal Temp 0 = ");
@@ -423,6 +412,20 @@ void drawButton(int button[4], char strarr[]) {
   tft.textEnlarge(0);
   tft.textColor(RA8875_BLACK, RA8875_WHITE);
   tft.textWrite(strarr);
+}
+
+void initGUI() {
+  drawButton(b_start_logging, "start log");
+  drawButton(b_stop_logging, "stop log");
+  drawButton(b_incr_time, "time (+ 1hr)");
+  drawButton(b_decr_time, "time (- 1hr)");
+  drawButton(b_incr_temp_lo, "temp lo +20c");
+  drawButton(b_decr_temp_lo, "temp lo -20c");
+  drawButton(b_incr_temp_hi, "temp hi +20c");
+  drawButton(b_decr_temp_hi, "temp hi -20c");
+  drawButton(b_plot_mean, "mean plot");
+  drawButton(b_plot_mxmn, "mxmn plot");
+  drawButton(b_plot_inst, "inst plot");
 }
 
 void updateInitStatus() {
