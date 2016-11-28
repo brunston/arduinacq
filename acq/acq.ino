@@ -80,6 +80,7 @@ Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 #define LOG_INTERVAL 500
 
 unsigned long log_timer;
+unsigned long plot_timer;
 unsigned long init_timer;
 
 // BUTTON INITIALIZATION
@@ -95,7 +96,7 @@ int b_incr_temp_hi[4] = {130, 130 + BUTTONSIZE[0], 320, 320 + BUTTONSIZE[1]};
 int b_decr_temp_hi[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
 int b_plot_mean[4] = {350, 350 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
 int b_plot_mxmn[4] = {350, 350 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
-int b_plot_inst[4] = {130 + 2*BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 20, 320 , 320 + BUTTONSIZE[1]};
+int b_plot_inst[4] = {130 + 2 * BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 20, 320 , 320 + BUTTONSIZE[1]};
 
 // BUTTON STATUS
 bool b_start_logging_status = false;
@@ -111,9 +112,26 @@ int b_graphlimits[3] = {12, 0, 100};
 #define BPLOTINST 2
 int b_plottype;
 
-//OUR DATAFILE NAME
+// OUR DATAFILE NAME
 char filename[13];
 File dataFile;
+
+// FOR makeGraph AND CUMULATIVE MOVING AVERAGE (CMA)
+int graphCursorX = 101; // change each time we write a new pixel of data.
+float ug_cma[6] = {0, 0, 0, 0, 0, 0}; // CMA for mean plottype
+long number_points_recorded = 0L; // for calculating CMA
+float ug_mx[6] = {0, 0, 0, 0, 0, 0}; // mxmn maximum
+float ug_mn[6] = {0, 0, 0, 0, 0, 0}; // mxmn minimum
+
+// GUI
+int gui_temp_scale[6] = {0, 20, 40, 60, 80, 100};
+
+// FOR FILE TIMESTAMPING
+void dateTime(uint16_t* date, uint16_t* time) {
+  DateTime now = RTC.now();
+  *date = FAT_DATE(now.year(), now.month(), now.day());
+  *time = FAT_TIME(now.hour(), now.minute(), now.second());
+}
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -151,12 +169,13 @@ void setup() {
   tft.fillRect(500, 20, 300, 20, RA8875_BLACK);
 
   // Open up the file we're going to log to! Use current date and a-z to differentiate each startup!
-  
+
+  SdFile::dateTimeCallback(dateTime);
   DateTime now = RTC.now();
   Serial.println("synced time");
   char yr[5];
   sprintf(yr, "%04u", now.year());
-  sprintf(filename,"%c%c%02u%02u-A.CSV",yr[2],yr[3],now.month(),now.day());
+  sprintf(filename, "%c%c%02u%02u-A.CSV", yr[2], yr[3], now.month(), now.day());
 
   // if there is already a file with a certain letter appended, move to next letter.
   for (uint8_t i = 0; i < 25; i++) {
@@ -167,7 +186,7 @@ void setup() {
       break;
     }
   }
-  
+
   Serial.println(filename);
   dataFile = SD.open(filename, FILE_WRITE);
   if (! dataFile) {
@@ -184,8 +203,9 @@ void setup() {
   Serial.print("Internal Temp 1 = ");
   Serial.println(thermocouple1.readInternal());
 
-  // GET TIMER LOG
+  // GET TIMER FOR LOG AND PLOT
   log_timer = millis();
+  plot_timer = millis();
   Serial.println("Setup done.");
 
 }
@@ -194,17 +214,11 @@ word prev_coordinates[10];
 word transfer_coords[10];
 byte nr_of_touches = 0;
 
-
-
 // status of button pushed and gui status
 bool logging_status = false;
 bool init_screen = true;
-int graph_interval = 5547 * b_graphlimits[BTIME]; // milliseconds per pixel per hour (to adjust by initscr)
+unsigned long graph_interval = 5547L * b_graphlimits[BTIME]; // ms per px per hour for timescale (to adjust by initscr)
 int init_interval = 200;
-
-// array of maxmin data for graph resizing REMOVE? POST-161019 GUI DISCUSSION
-int resize_data[41][6]; // we want to store each of these maxmins for our whole graph width (16*41)
-int every_16[16][6]; // we want to get max min of every 16 data point chunk
 
 void loop() {
   byte registers[FT5206_NUMBER_OF_REGISTERS];
@@ -239,9 +253,15 @@ void loop() {
       if (init_screen && ((millis() - init_timer) >= init_interval)) {
         if (withinBounds(x, y, b_incr_time)) {
           b_graphlimits[BTIME] += 1;
+          graph_interval = 5547L * b_graphlimits[BTIME]; // adjust graph_interval
+          Serial.print("graph interval ms: ");
+          Serial.println(graph_interval); // debug
         }
         if (withinBounds(x, y, b_decr_time)) {
           b_graphlimits[BTIME] -= 1;
+          graph_interval = 5547L * b_graphlimits[BTIME]; // adjust graph_interval
+          Serial.print("graph interval ms: ");
+          Serial.println(graph_interval); // debug
         }
         if (withinBounds(x, y, b_incr_temp_lo)) {
           b_graphlimits[BTEMPLO] += 20;
@@ -264,9 +284,17 @@ void loop() {
         if (withinBounds(x, y, b_plot_inst)) {
           b_plottype = BPLOTINST;
         }
+        gui_temp_scale[0] = b_graphlimits[BTEMPLO];
+        for (byte i = 1; i < 5; i = i + 1) {
+          gui_temp_scale[i] = (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]) / 5 * i;
+        }
+        gui_temp_scale[5] = b_graphlimits[BTEMPHI];
+         
+        
+        
         init_timer = millis();
       }
-      
+
       if (logging_status == false && b_start_logging_status == true) {
         logging_status = true;
         init_screen = false;
@@ -296,11 +324,15 @@ void loop() {
     tft.textWrite("INITSCR");
     updateInitStatus();
   }
+  unsigned long timenow;
   if (logging_status) {
     updateStatus("Logging running.        ");
-    if ((millis() - log_timer) >= LOG_INTERVAL) {
+    timenow = millis();
+    if ((timenow - log_timer) >= LOG_INTERVAL) {
       DateTime now = RTC.now();
-      float d_vals[6] = {analogRead(A0), analogRead(A1), analogRead(A2), analogRead(A3), thermocouple0.readInternal(), thermocouple1.readInternal()};
+      float d_vals[6] = {analogRead(A0), analogRead(A1), analogRead(A2), analogRead(A3),
+                         thermocouple0.readInternal(), thermocouple1.readInternal()
+                        };
       Serial.println("attempting to write to log"); //DEBUG
       dataFile.print(now.year(), DEC);
       dataFile.print(now.month(), DEC);
@@ -323,11 +355,66 @@ void loop() {
       dataFile.print(d_vals[4]);
       dataFile.print("\t");
       dataFile.println(d_vals[5]);
-      if ((millis() - log_timer) >= graph_interval) {
-        updateGraph(d_vals[0], d_vals[1], d_vals[2], d_vals[3], d_vals[4], d_vals[5], b_plottype);
+
+      // plot data update
+      if (b_plottype == BPLOTMEAN) {
+        number_points_recorded = number_points_recorded + 1;
+        Serial.print("New number_points_recorded: ");
+        Serial.println(number_points_recorded); // DEBUG
+        for (byte i = 0; i < 6; i = i + 1) {
+          ug_cma[i] = ((number_points_recorded - 1) * ug_cma[i] + d_vals[i]) / number_points_recorded;
+          Serial.print(ug_cma[i]); // debug
+        }
       }
+      if (b_plottype == BPLOTMXMN) {
+        if (ug_mx[0] == 0 && ug_mx[1] == 0 && ug_mx[2] == 0 && ug_mx[3] == 0 && ug_mx[4] == 0 && ug_mx[5] == 0) {
+          for (byte i = 0; i < 6; i = i + 1) {
+            ug_mx[i] = d_vals[i];
+            ug_mn[i] = d_vals[i];
+          }
+        }
+        else {
+          for (byte i = 0; i < 6; i = i + 1) {
+            if (ug_mx[i] < d_vals[i]) {
+              ug_mx[i] = d_vals[i];
+            }
+            if (ug_mn[i] > d_vals[i]) {
+              ug_mn[i] = d_vals[i];
+            }
+          }
+        }
+      }
+
       log_timer = millis();
     }
+    if ((timenow - plot_timer) >= graph_interval) {
+      if (b_plottype == BPLOTINST) {
+        float d_vals[6] = {analogRead(A0), analogRead(A1), analogRead(A2), analogRead(A3),
+                           thermocouple0.readInternal(), thermocouple1.readInternal()
+                          };
+        updateGraph(d_vals[0], d_vals[1], d_vals[2], d_vals[3], d_vals[4], d_vals[5], b_plottype);
+      }
+
+      if (b_plottype == BPLOTMEAN) {
+        updateGraph(ug_cma[0], ug_cma[1], ug_cma[2], ug_cma[3], ug_cma[4], ug_cma[5], b_plottype);
+        number_points_recorded = 0L;
+        // reset CMA
+        for (byte i = 0; i < 6; i = i + 1) {
+          ug_cma[i] = 0;
+        }
+      }
+      if (b_plottype == BPLOTMXMN) {
+        updateGraph(ug_mx[0], ug_mx[1], ug_mx[2], ug_mx[3], ug_mx[4], ug_mx[5], b_plottype);
+        // reset mxmn
+        for (byte i = 0; i < 6; i = i + 1) {
+          ug_mx[i] = 0;
+          ug_mn[i] = 0;
+        }
+      }
+
+      plot_timer = millis();
+    }
+
     dataFile.close();
   }
   else {
@@ -382,25 +469,31 @@ bool withinBounds(int x, int y, int button[4]) { // determines if a touch is wit
   return (x > button[0] && x < button[1] && y > button[2] && y < button[3]);
 }
 
-int graphCursorX = 101; // change each time we write a new pixel of data.
-float ug_cma = 0; // cumulative moving average for mean plottype
-float ug_mx = 0; // mxmn maximum
-float ug_mn = 0; // mxmn minimum
 void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1, int plot_type) {
-//  if (graphCursorX == 750) {
-//    while (1); //temporary while I implement the rest of this functionality.
-//  }
-  
+  //  if (graphCursorX == 750) {
+  //    while (1); //temporary while I implement the rest of this functionality.
+  //  }
+
   tft.graphicsMode();
   // 450 - is because screen is upper-left 0,0 indexed;
   // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
-  // * 0.07 is pixels per mV; + 0.5 is for rounding; .
+  // * 0.07 is pixels per mV; + 0.5 is for rounding;
+  float temp_neg_offset_from_zero = 0 - b_graphlimits[BTEMPLO];
+  float temp_to_px = 100 / (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]) * 3.5;
   tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
   tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
   tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
   tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
-  tft.drawPixel(graphCursorX, int(450 - dat_t0 * 3.5 + 0.5), RA8875_RED);
-  tft.drawPixel(graphCursorX, int(450 - dat_t1 * 3.5 + 0.5), RA8875_MAGENTA);
+  tft.drawPixel(graphCursorX, int(450 - (dat_t0 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
+  tft.drawPixel(graphCursorX, int(450 - (dat_t1 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+  if (plot_type == BPLOTMXMN) {
+    tft.drawPixel(graphCursorX, int(450 - ug_mn[0] * 4.883 * 0.07 + 0.5), RA8875_WHITE);
+    tft.drawPixel(graphCursorX, int(450 - ug_mn[1] * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
+    tft.drawPixel(graphCursorX, int(450 - ug_mn[2] * 4.883 * 0.07 + 0.5), RA8875_GREEN);
+    tft.drawPixel(graphCursorX, int(450 - ug_mn[3] * 4.883 * 0.07 + 0.5), RA8875_CYAN);
+    tft.drawPixel(graphCursorX, int(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
+    tft.drawPixel(graphCursorX, int(450 - (ug_mn[5] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+  }
   graphCursorX = graphCursorX + 1;
 }
 
@@ -526,17 +619,29 @@ void makeGraph() {
   tft.textWrite("Temp.");
   tft.textColor(RA8875_WHITE, RA8875_BLACK);
   tft.textSetCursor(761, 100);
-  tft.textWrite("100c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 100);
+  tft.print(gui_temp_scale[5]);
   tft.textSetCursor(761, 170);
-  tft.textWrite("80 c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 170);
+  tft.print(gui_temp_scale[4]);
   tft.textSetCursor(761, 240);
-  tft.textWrite("60 c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 240);
+  tft.print(gui_temp_scale[3]);
   tft.textSetCursor(761, 310);
-  tft.textWrite("40 c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 310);
+  tft.print(gui_temp_scale[2]);
   tft.textSetCursor(761, 380);
-  tft.textWrite("20 c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 380);
+  tft.print(gui_temp_scale[1]);
   tft.textSetCursor(761, 440);
-  tft.textWrite("0 c");
+  tft.textWrite("   ");
+  tft.textSetCursor(761, 440);
+  tft.print(gui_temp_scale[0]);
 
   tft.graphicsMode();
   tft.drawLine(100, 450, 750, 450, RA8875_WHITE);
