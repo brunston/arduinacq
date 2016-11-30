@@ -1,5 +1,8 @@
 /***************************************************************************************
   arduinacq data acquisition and chart recording system
+  github.com/brunston/arduinacq
+
+  
   with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
   2 Thermocouples (Adafruit MAX31855)
   Adafruit Data Logger Shield
@@ -43,14 +46,6 @@ Adafruit_RA8875 tft = Adafruit_RA8875(RA8875_CS, RA8875_RESET);
 FT5x06 cmt = FT5x06(CTP_INT);
 
 //TFTButton button = TFTButton(100,100,300,100,tft);
-
-// For the screen position
-#define X_MAX 800
-#define Y_MAX 480
-#define X_LEFT 19
-#define X_RIGHT 791
-#define Y_TOP 19
-#define Y_BOT 461
 
 // set up variables using the RTC utility library functions:
 RTC_DS1307 RTC;
@@ -230,12 +225,6 @@ void loop() {
     cmt.getRegisterInfo(registers);
     nr_of_touches = cmt.getTouchPositions(coordinates, registers);
     prev_nr_of_touches = nr_of_touches;
-
-    //for (byte i = 0 ; i < prev_nr_of_touches; i++){
-    //  word x = prev_coordinates[i * 2];
-    //  word y = prev_coordinates[i * 2 + 1];
-    //  tft.fillCircle(x, y, 70, RA8875_BLACK);
-    //}
 
     for (byte i = 0; i < nr_of_touches; i++) {
       word x = coordinates[i * 2];
@@ -476,16 +465,17 @@ void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float d
 
   tft.graphicsMode();
   // 450 - is because screen is upper-left 0,0 indexed;
-  // * 4.883 is mV per analogRead unit; * 3.5 is pixels per degree C;
+  // * 4.883 is mV per analogRead unit; temperature scaling is temp_to_px;
   // * 0.07 is pixels per mV; + 0.5 is for rounding;
   float temp_neg_offset_from_zero = 0 - b_graphlimits[BTEMPLO];
-  float temp_to_px = 100 / (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]) * 3.5;
+  float temp_to_px = 350 / (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]);
   tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
   tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
   tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
   tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
   tft.drawPixel(graphCursorX, int(450 - (dat_t0 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
   tft.drawPixel(graphCursorX, int(450 - (dat_t1 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+  Serial.println(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5);
   if (plot_type == BPLOTMXMN) {
     tft.drawPixel(graphCursorX, int(450 - ug_mn[0] * 4.883 * 0.07 + 0.5), RA8875_WHITE);
     tft.drawPixel(graphCursorX, int(450 - ug_mn[1] * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
