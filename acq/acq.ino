@@ -2,7 +2,7 @@
   arduinacq data acquisition and chart recording system
   github.com/brunston/arduinacq
 
-  
+
   with ER-TFTM070-5 (LCD) from EastRising (bought from buydisplay.com). Depends on RA8875 library from Adafruit.
   2 Thermocouples (Adafruit MAX31855)
   Adafruit Data Logger Shield
@@ -71,27 +71,29 @@ const int chipSelect = 10;
 Adafruit_MAX31855 thermocouple0(thermo0CLK, thermo0CS, thermo0DO);
 Adafruit_MAX31855 thermocouple1(thermo1CLK, thermo1CS, thermo1DO);
 
+// ACQUISITION RATE (LOGGING INTERVAL)
 // Our logging interval in milliseconds, and timing/logging info
-#define LOG_INTERVAL 500
+int LOG_INTERVAL = 500; // minimum is 250 milliseconds
 
 unsigned long log_timer;
 unsigned long plot_timer;
 unsigned long init_timer;
 
 // BUTTON INITIALIZATION
-int BUTTONSIZE[2] = {100, 50};
 // int button_name[4] = {leftx, rightx, topy, boty};
-int b_start_logging[4] = {20, 20 + BUTTONSIZE[0], 20, 20 + BUTTONSIZE[1]};
-int b_stop_logging[4] = {20 + BUTTONSIZE[0] + 10, 20 + 2 * BUTTONSIZE[0] + 10, 20 , 20 + BUTTONSIZE[1]};
-int b_incr_time[4] = {130, 130 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
-int b_decr_time[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 120 , 120 + BUTTONSIZE[1]};
-int b_incr_temp_lo[4] = {130, 130 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
-int b_decr_temp_lo[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 220 , 220 + BUTTONSIZE[1]};
-int b_incr_temp_hi[4] = {130, 130 + BUTTONSIZE[0], 320, 320 + BUTTONSIZE[1]};
-int b_decr_temp_hi[4] = {130 + BUTTONSIZE[0] + 10, 130 + 2 * BUTTONSIZE[0] + 10, 320 , 320 + BUTTONSIZE[1]};
-int b_plot_mean[4] = {350, 350 + BUTTONSIZE[0], 120, 120 + BUTTONSIZE[1]};
-int b_plot_mxmn[4] = {350, 350 + BUTTONSIZE[0], 220, 220 + BUTTONSIZE[1]};
-int b_plot_inst[4] = {130 + 2 * BUTTONSIZE[0] + 20, 130 + 3 * BUTTONSIZE[0] + 20, 320 , 320 + BUTTONSIZE[1]};
+int b_start_logging[4] = {20, 120, 20, 70};
+int b_stop_logging[4] = {130, 230, 20 , 70};
+int b_decr_time[4] = {270, 390, 120, 170};
+int b_incr_time[4] = {400, 520, 120, 170};
+int b_decr_temp_hi[4] = {270, 390, 200, 250};
+int b_incr_temp_hi[4] = {400, 520, 200, 250};
+int b_decr_temp_lo[4] = {270, 390, 280, 330};
+int b_incr_temp_lo[4] = {400, 520, 280, 330};
+int b_decr_acq[4] = {270, 390, 380, 430};
+int b_incr_acq[4] = {400, 520, 380, 430};
+int b_plot_mean[4] = {130, 230, 120, 170};
+int b_plot_mxmn[4] = {130, 230, 200, 250};
+int b_plot_inst[4] = {130, 230, 280, 330};
 
 // BUTTON STATUS
 bool b_start_logging_status = false;
@@ -120,6 +122,7 @@ float ug_mn[6] = {0, 0, 0, 0, 0, 0}; // mxmn minimum
 
 // GUI
 int gui_temp_scale[6] = {0, 20, 40, 60, 80, 100};
+float gui_time_scale[6] = {0, 2.4, 4.8, 7.2, 9.6, 12};
 
 // FOR FILE TIMESTAMPING
 void dateTime(uint16_t* date, uint16_t* time) {
@@ -243,14 +246,10 @@ void loop() {
         if (withinBounds(x, y, b_incr_time)) {
           b_graphlimits[BTIME] += 1;
           graph_interval = 5547L * b_graphlimits[BTIME]; // adjust graph_interval
-          Serial.print("graph interval ms: ");
-          Serial.println(graph_interval); // debug
         }
         if (withinBounds(x, y, b_decr_time)) {
           b_graphlimits[BTIME] -= 1;
           graph_interval = 5547L * b_graphlimits[BTIME]; // adjust graph_interval
-          Serial.print("graph interval ms: ");
-          Serial.println(graph_interval); // debug
         }
         if (withinBounds(x, y, b_incr_temp_lo)) {
           b_graphlimits[BTEMPLO] += 20;
@@ -273,14 +272,24 @@ void loop() {
         if (withinBounds(x, y, b_plot_inst)) {
           b_plottype = BPLOTINST;
         }
+        if (withinBounds(x, y, b_incr_acq)) {
+          LOG_INTERVAL += 250;
+        }
+        if (withinBounds(x, y, b_decr_acq)) {
+          LOG_INTERVAL -= 250;
+        }
         gui_temp_scale[0] = b_graphlimits[BTEMPLO];
         for (byte i = 1; i < 5; i = i + 1) {
           gui_temp_scale[i] = (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]) / 5 * i;
         }
         gui_temp_scale[5] = b_graphlimits[BTEMPHI];
-         
-        
-        
+
+        for (byte i = 0; i < 6; i = i + 1) {
+          gui_time_scale[i] = b_graphlimits[BTIME] / 5.0 * i;
+        }
+
+
+
         init_timer = millis();
       }
 
@@ -308,9 +317,37 @@ void loop() {
     tft.textEnlarge(0);
     tft.textColor(RA8875_BLACK, RA8875_WHITE);
     tft.textWrite("arduinacq");
-    tft.textSetCursor(360, 100);
+    tft.textSetCursor(540, 100);
+    tft.textWrite("CURRENT PARAMETERS");
+    tft.textSetCursor(130, 100);
+    tft.textWrite("PLOT TYPE");
+    tft.textSetCursor(270, 100);
+    tft.textWrite("ADJUST PLOT DISPLAY PARAMETERS");
+    tft.textSetCursor(270, 360);
+    tft.textWrite("ADJUST DATA ACQUISITION RATE");
+    tft.textSetCursor(540, 250);
+    tft.textWrite("HOW TO INITIALIZE");
+    tft.textColor(RA8875_WHITE, RA8875_BLACK);
+    tft.textSetCursor(540, 270);
+    tft.print("Adjust plot display to");
+    tft.textSetCursor(540, 290);
+    tft.print("change limits of graph."); 
+    tft.textSetCursor(540, 310);
+    tft.print("Mean averages points each");
+    tft.textSetCursor(540, 330);
+    tft.print("interval. Inst shows data");
+    tft.textSetCursor(540, 350);
+    tft.print("at plot time. Minmax plots");
+    tft.textSetCursor(540, 370);
+    tft.print("2. Acquire rate affects");
+    tft.textSetCursor(540, 390);
+    tft.print("data points per second");
+    tft.textSetCursor(540, 410);
+    tft.print("written to disk.");
+    tft.textSetCursor(540, 430);
     tft.textColor(RA8875_BLACK, RA8875_WHITE);
-    tft.textWrite("INITSCR");
+    tft.print("Tap 'Start log' to begin!");
+    tft.textColor(RA8875_WHITE, RA8875_BLACK);
     updateInitStatus();
   }
   unsigned long timenow;
@@ -459,32 +496,33 @@ bool withinBounds(int x, int y, int button[4]) { // determines if a touch is wit
 }
 
 void updateGraph(float dat_a0, float dat_a1, float dat_a2, float dat_a3, float dat_t0, float dat_t1, int plot_type) {
-  //  if (graphCursorX == 750) {
-  //    while (1); //temporary while I implement the rest of this functionality.
-  //  }
-
-  tft.graphicsMode();
-  // 450 - is because screen is upper-left 0,0 indexed;
-  // * 4.883 is mV per analogRead unit; temperature scaling is temp_to_px;
-  // * 0.07 is pixels per mV; + 0.5 is for rounding;
-  float temp_neg_offset_from_zero = 0 - b_graphlimits[BTEMPLO];
-  float temp_to_px = 350 / (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]);
-  tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
-  tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
-  tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
-  tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
-  tft.drawPixel(graphCursorX, int(450 - (dat_t0 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
-  tft.drawPixel(graphCursorX, int(450 - (dat_t1 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
-  Serial.println(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5);
-  if (plot_type == BPLOTMXMN) {
-    tft.drawPixel(graphCursorX, int(450 - ug_mn[0] * 4.883 * 0.07 + 0.5), RA8875_WHITE);
-    tft.drawPixel(graphCursorX, int(450 - ug_mn[1] * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
-    tft.drawPixel(graphCursorX, int(450 - ug_mn[2] * 4.883 * 0.07 + 0.5), RA8875_GREEN);
-    tft.drawPixel(graphCursorX, int(450 - ug_mn[3] * 4.883 * 0.07 + 0.5), RA8875_CYAN);
-    tft.drawPixel(graphCursorX, int(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
-    tft.drawPixel(graphCursorX, int(450 - (ug_mn[5] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+  if (graphCursorX != 750) {
+    tft.graphicsMode();
+    // 450 - is because screen is upper-left 0,0 indexed;
+    // * 4.883 is mV per analogRead unit; temperature scaling is temp_to_px;
+    // * 0.07 is pixels per mV; + 0.5 is for rounding;
+    float temp_neg_offset_from_zero = 0 - b_graphlimits[BTEMPLO];
+    float temp_to_px = 350 / (b_graphlimits[BTEMPHI] - b_graphlimits[BTEMPLO]);
+    tft.drawPixel(graphCursorX, int(450 - dat_a0 * 4.883 * 0.07 + 0.5), RA8875_WHITE);
+    tft.drawPixel(graphCursorX, int(450 - dat_a1 * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
+    tft.drawPixel(graphCursorX, int(450 - dat_a2 * 4.883 * 0.07 + 0.5), RA8875_GREEN);
+    tft.drawPixel(graphCursorX, int(450 - dat_a3 * 4.883 * 0.07 + 0.5), RA8875_CYAN);
+    tft.drawPixel(graphCursorX, int(450 - (dat_t0 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
+    tft.drawPixel(graphCursorX, int(450 - (dat_t1 + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+    Serial.println(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5);
+    if (plot_type == BPLOTMXMN) {
+      tft.drawPixel(graphCursorX, int(450 - ug_mn[0] * 4.883 * 0.07 + 0.5), RA8875_WHITE);
+      tft.drawPixel(graphCursorX, int(450 - ug_mn[1] * 4.883 * 0.07 + 0.5), RA8875_YELLOW);
+      tft.drawPixel(graphCursorX, int(450 - ug_mn[2] * 4.883 * 0.07 + 0.5), RA8875_GREEN);
+      tft.drawPixel(graphCursorX, int(450 - ug_mn[3] * 4.883 * 0.07 + 0.5), RA8875_CYAN);
+      tft.drawPixel(graphCursorX, int(450 - (ug_mn[4] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_RED);
+      tft.drawPixel(graphCursorX, int(450 - (ug_mn[5] + temp_neg_offset_from_zero) * temp_to_px + 0.5), RA8875_MAGENTA);
+    }
+    graphCursorX = graphCursorX + 1;
   }
-  graphCursorX = graphCursorX + 1;
+  else {
+    Serial.println("out of space, don't update the graph more");
+  }
 }
 
 void drawButton(int button[4], char strarr[]) {
@@ -502,41 +540,43 @@ void initGUI() {
   drawButton(b_stop_logging, "stop log");
   drawButton(b_incr_time, "time (+ 1hr)");
   drawButton(b_decr_time, "time (- 1hr)");
-  drawButton(b_incr_temp_lo, "temp lo +20c");
-  drawButton(b_decr_temp_lo, "temp lo -20c");
-  drawButton(b_incr_temp_hi, "temp hi +20c");
-  drawButton(b_decr_temp_hi, "temp hi -20c");
+  drawButton(b_incr_temp_lo, "temp min +20c");
+  drawButton(b_decr_temp_lo, "temp min -20c");
+  drawButton(b_incr_temp_hi, "temp max +20c");
+  drawButton(b_decr_temp_hi, "temp max -20c");
+  drawButton(b_incr_acq, "acq rate +250ms");
+  drawButton(b_decr_acq, "acq rate -250ms");  
   drawButton(b_plot_mean, "mean plot");
-  drawButton(b_plot_mxmn, "mxmn plot");
+  drawButton(b_plot_mxmn, "minmax plot");
   drawButton(b_plot_inst, "inst plot");
 }
 
 void updateInitStatus() {
   tft.textMode();
-  tft.textSetCursor(500, 110);
+  tft.textSetCursor(540, 130);
   tft.textColor(RA8875_WHITE, RA8875_BLACK);
-  tft.textWrite("Time:");
-  tft.textSetCursor(580, 110);
+  tft.textWrite("Time (hrs):");
+  tft.textSetCursor(660, 130);
   tft.textWrite("     ");
-  tft.textSetCursor(580, 110);
+  tft.textSetCursor(660, 130);
   tft.print(b_graphlimits[BTIME]);
-  tft.textSetCursor(500, 130);
-  tft.textWrite("Temp (lo):");
-  tft.textSetCursor(580, 130);
+  tft.textSetCursor(540, 150);
+  tft.textWrite("Temp max (c):");
+  tft.textSetCursor(660, 150);
   tft.textWrite("     ");
-  tft.textSetCursor(580, 130);
-  tft.print(b_graphlimits[BTEMPLO]);
-  tft.textSetCursor(500, 150);
-  tft.textWrite("Temp (hi):");
-  tft.textSetCursor(580, 150);
-  tft.textWrite("     ");
-  tft.textSetCursor(580, 150);
+  tft.textSetCursor(660, 150);
   tft.print(b_graphlimits[BTEMPHI]);
-  tft.textSetCursor(500, 170);
-  tft.textWrite("Plot:");
-  tft.textSetCursor(580, 170);
+  tft.textSetCursor(540, 170);
+  tft.textWrite("Temp min (c):");
+  tft.textSetCursor(660, 170);
   tft.textWrite("     ");
-  tft.textSetCursor(580, 170);
+  tft.textSetCursor(660, 170);
+  tft.print(b_graphlimits[BTEMPLO]);
+  tft.textSetCursor(540, 190);
+  tft.textWrite("Plot type:");
+  tft.textSetCursor(660, 190);
+  tft.textWrite("     ");
+  tft.textSetCursor(660, 190);
   if (b_plottype == BPLOTMEAN) {
     tft.textWrite("mean");
   }
@@ -546,6 +586,12 @@ void updateInitStatus() {
   else if (b_plottype == BPLOTINST) {
     tft.textWrite("inst");
   }
+  tft.textSetCursor(540, 210);
+  tft.textWrite("Acq rate (ms):");
+  tft.textSetCursor(660, 210);
+  tft.textWrite("     ");
+  tft.textSetCursor(660, 210);
+  tft.print(LOG_INTERVAL);
 }
 
 void makeGraph() {
@@ -604,9 +650,10 @@ void makeGraph() {
   tft.textWrite("1000[mV]");
   tft.textSetCursor(20, 440);
   tft.textWrite("0[mV]");
+
   tft.textSetCursor(751, 80);
   tft.textColor(RA8875_BLACK, RA8875_WHITE);
-  tft.textWrite("Temp.");
+  tft.textWrite("Deg. C");
   tft.textColor(RA8875_WHITE, RA8875_BLACK);
   tft.textSetCursor(761, 100);
   tft.textWrite("   ");
@@ -633,6 +680,35 @@ void makeGraph() {
   tft.textSetCursor(761, 440);
   tft.print(gui_temp_scale[0]);
 
+  tft.textSetCursor(40, 465);
+  tft.textColor(RA8875_BLACK, RA8875_WHITE);
+  tft.textWrite("Hours");
+  tft.textColor(RA8875_WHITE, RA8875_BLACK);
+  tft.textSetCursor(100, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(100, 465);
+  tft.print(gui_time_scale[0]);
+  tft.textSetCursor(230, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(230, 465);
+  tft.print(gui_time_scale[1]);
+  tft.textSetCursor(360, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(360, 465);
+  tft.print(gui_time_scale[2]);
+  tft.textSetCursor(490, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(490, 465);
+  tft.print(gui_time_scale[3]);
+  tft.textSetCursor(620, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(620, 465);
+  tft.print(gui_time_scale[4]);
+  tft.textSetCursor(750, 465);
+  tft.textWrite("  ");
+  tft.textSetCursor(750, 465);
+  tft.print(gui_time_scale[5]);
+
   tft.graphicsMode();
   tft.drawLine(100, 450, 750, 450, RA8875_WHITE);
   tft.drawLine(100, 100, 100, 450, RA8875_WHITE);
@@ -650,5 +726,12 @@ void makeGraph() {
   tft.drawLine(750, 310, 760, 310, RA8875_WHITE);
   tft.drawLine(750, 380, 760, 380, RA8875_WHITE);
   tft.drawLine(750, 450, 760, 450, RA8875_WHITE);
+
+  tft.drawLine(100, 450, 100, 460, RA8875_WHITE);
+  tft.drawLine(230, 450, 230, 460, RA8875_WHITE);
+  tft.drawLine(360, 450, 360, 460, RA8875_WHITE);
+  tft.drawLine(490, 450, 490, 460, RA8875_WHITE);
+  tft.drawLine(620, 450, 620, 460, RA8875_WHITE);
+  tft.drawLine(750, 450, 750, 460, RA8875_WHITE);
 
 }
